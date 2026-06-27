@@ -113,6 +113,24 @@ const FALLBACK_WHEELS: Wheel[] = [
 // when NO aftermarket WheelFitment is selected (a wheel fitment carries its own tire).
 type TireOpt = { id: string; od: number; rim: number };
 
+// Oversized BIG-TIRE option set (RideStyler `TireFitment`). Unlike the per-vehicle factory
+// `VehicleTireOption` packages above (~31–34"), these are entries from RideStyler's GENERIC
+// commercial tire catalog (`Tire/GetFitmentDescriptions`) — the same for every vehicle — and
+// they render a visibly larger tire. Each `id` + outside-diameter (`od`, in) below was verified
+// live (Vehicle/Render md5-diff vs the factory render) to enlarge the rendered tire.
+//   35" = 10R17.5 · 40" = 10R22.5 · 42" = 11R22.5 · 44" = 11R24.5 · 46" = 12R24.5
+// NOTE: their commercial rim diameters (17.5"–24.5") conflict with aftermarket wheel fitments
+// — pairing `TireFitment` with a `WheelFitment` returns "Sizes conflict" and no image — so a
+// big tire renders on FACTORY wheels only (identical rule to VehicleTireOption). Selecting one
+// therefore clears any aftermarket wheel, and buildRenderUrl never sends both at once.
+const BIG_TIRES: { id: string; od: number }[] = [
+  { id: "e9f583ed-584f-4d51-8cf3-d9b6316f55fe", od: 35 }, // 10R17.5
+  { id: "ffb980a3-eb6f-476f-8cee-5d86c4e90d5a", od: 40 }, // 10R22.5
+  { id: "fee0cb41-d4ea-451c-b013-98e541629683", od: 42 }, // 11R22.5
+  { id: "feda88ec-597e-4129-b9bd-8fa8f031f772", od: 44 }, // 11R24.5
+  { id: "efa04fd9-8578-44ae-bf89-89e0c9d711c5", od: 46 }, // 12R24.5
+];
+
 const RENDER_W = 1000;
 const RENDER_H = 620;
 const STAGE_BG =
@@ -124,6 +142,7 @@ type Spec = {
   lift: number;
   wheelId: string;
   tireOptionId: string; // "" = stock/default factory tire
+  tireFitmentId: string; // "" = none; else an oversized BIG_TIRES `TireFitment` id
   view: RideStylerView;
 };
 
@@ -138,8 +157,12 @@ function buildRenderUrl(s: Spec): string {
   p.set("IncludeShadow", "true");
   if (s.lift > 0) p.set("Suspension", String(s.lift));
   if (s.wheelId) {
-    // Aftermarket wheel governs the tire — VehicleTireOption is ignored by the API here.
+    // Aftermarket wheel governs the tire — VehicleTireOption/TireFitment are ignored (and a
+    // big TireFitment would actively conflict with the wheel's rim), so we send neither here.
     p.set("WheelFitment", s.wheelId);
+  } else if (s.tireFitmentId) {
+    // Oversized commercial tire layered on the factory wheel.
+    p.set("TireFitment", s.tireFitmentId);
   } else if (s.tireOptionId) {
     p.set("VehicleTireOption", s.tireOptionId);
   }
@@ -185,6 +208,7 @@ export default function RideStylerStage() {
   const [wheels, setWheels] = useState<Wheel[]>(FALLBACK_WHEELS);
   const [tireOptions, setTireOptions] = useState<TireOpt[]>([]);
   const [tireOptionId, setTireOptionId] = useState<string>(""); // "" = stock/default
+  const [tireFitmentId, setTireFitmentId] = useState<string>(""); // "" = none; else a BIG_TIRES id
 
   // Smooth swap: the visible image always shows the last fully-loaded URL.
   const [displayedUrl, setDisplayedUrl] = useState<string>("");
@@ -199,6 +223,7 @@ export default function RideStylerStage() {
     setView(t.views[0]);
     setWheelId("");
     setTireOptionId("");
+    setTireFitmentId("");
   }, []);
 
   // Mobile flow handlers.
@@ -277,8 +302,8 @@ export default function RideStylerStage() {
 
   const safeView: RideStylerView = truck.views.includes(view) ? view : truck.views[0];
   const spec: Spec = useMemo(
-    () => ({ truckId, paint, lift, wheelId, tireOptionId, view: safeView }),
-    [truckId, paint, lift, wheelId, tireOptionId, safeView],
+    () => ({ truckId, paint, lift, wheelId, tireOptionId, tireFitmentId, view: safeView }),
+    [truckId, paint, lift, wheelId, tireOptionId, tireFitmentId, safeView],
   );
   const renderUrl = useMemo(() => buildRenderUrl(spec), [spec]);
 
@@ -338,7 +363,11 @@ export default function RideStylerStage() {
     for (const c of PAINTS) rest.push(buildRenderUrl({ ...spec, paint: c.hex }));
     // Factory tire packages (only render on factory wheels).
     for (const t of tireOptions) {
-      rest.push(buildRenderUrl({ ...spec, wheelId: "", tireOptionId: t.id }));
+      rest.push(buildRenderUrl({ ...spec, wheelId: "", tireFitmentId: "", tireOptionId: t.id }));
+    }
+    // Oversized big tires (also factory-wheels only).
+    for (const t of BIG_TIRES) {
+      rest.push(buildRenderUrl({ ...spec, wheelId: "", tireOptionId: "", tireFitmentId: t.id }));
     }
     enqueue(rest);
   }, [spec, wheels, tireOptions, truck, enqueue]);
@@ -362,13 +391,23 @@ export default function RideStylerStage() {
       })()
     : "Factory";
 
-  // Tire size only applies on factory wheels (aftermarket wheels carry their own tire).
-  const hasTireControl = tireOptions.length > 1;
+  // Tire size only applies on factory wheels (aftermarket wheels carry their own tire). The
+  // control now offers the factory packages PLUS the oversized BIG_TIRES set, so it's always
+  // available (BIG_TIRES is non-empty) even for trucks with a single factory fitment.
+  const hasTireControl = BIG_TIRES.length > 0 || tireOptions.length > 1;
   const tireGovernedByWheel = !!wheelId;
+  const selectedBigTire = tireFitmentId
+    ? BIG_TIRES.find((t) => t.id === tireFitmentId) ?? null
+    : null;
   const selectedTire =
     (tireOptionId ? tireOptions.find((t) => t.id === tireOptionId) : tireOptions[0]) ?? null;
-  const activeTireLabel =
-    tireGovernedByWheel || !selectedTire ? null : `${Math.round(selectedTire.od)}"`;
+  const activeTireLabel = tireGovernedByWheel
+    ? null
+    : selectedBigTire
+      ? `${selectedBigTire.od}"`
+      : selectedTire
+        ? `${Math.round(selectedTire.od)}"`
+        : null;
 
   const trucksForMake = rideStylerTrucks.filter((t) => t.make === activeMake);
 
@@ -490,9 +529,10 @@ export default function RideStylerStage() {
     </div>
   );
 
-  // Tire size = the vehicle's factory tire packages (`VehicleTireOption`). These are the
-  // only tire diameters RideStyler's render exposes (stock ~31–34"); picking one switches
-  // back to factory wheels so it actually applies. Dimmed when an aftermarket wheel is set.
+  // Tire size = the vehicle's factory tire packages (`VehicleTireOption`, stock ~31–34")
+  // followed by the oversized BIG_TIRES set (`TireFitment`, 35–46" commercial). Picking ANY of
+  // them switches back to factory wheels so it actually applies (a big TireFitment conflicts
+  // with an aftermarket wheel's rim). Dimmed when an aftermarket wheel is set.
   const tireControl = (scroll: boolean) => (
     <div
       className={`${
@@ -500,12 +540,14 @@ export default function RideStylerStage() {
       } ${tireGovernedByWheel ? "opacity-50" : ""}`}
     >
       {tireOptions.map((t, i) => {
-        const selected = tireOptionId ? tireOptionId === t.id : i === 0;
+        // A big tire being active means no factory chip is selected (not even the stock one).
+        const selected = !tireFitmentId && (tireOptionId ? tireOptionId === t.id : i === 0);
         return (
           <button
             key={t.id}
             onClick={() => {
               setTireOptionId(i === 0 ? "" : t.id);
+              setTireFitmentId(""); // factory package and big tire are mutually exclusive
               setWheelId(""); // tire packages only render on factory wheels
             }}
             className={`shrink-0 w-[92px] px-3 py-2 min-h-[48px] text-xs font-semibold text-left border transition-colors ${
@@ -516,6 +558,27 @@ export default function RideStylerStage() {
           >
             <span className="block truncate">{Math.round(t.od)}&quot;</span>
             <span className="block truncate opacity-70">{t.rim}&quot; wheel</span>
+          </button>
+        );
+      })}
+      {BIG_TIRES.map((t) => {
+        const selected = tireFitmentId === t.id;
+        return (
+          <button
+            key={t.id}
+            onClick={() => {
+              setTireFitmentId(t.id);
+              setTireOptionId(""); // big tire and factory package are mutually exclusive
+              setWheelId(""); // big TireFitment renders on factory wheels only
+            }}
+            className={`shrink-0 w-[92px] px-3 py-2 min-h-[48px] text-xs font-semibold text-left border transition-colors ${
+              selected && !tireGovernedByWheel
+                ? "bg-brand text-white border-brand"
+                : "bg-white text-ink border-line active:border-brand"
+            }`}
+          >
+            <span className="block truncate">{t.od}&quot;</span>
+            <span className="block truncate opacity-70">XL · oversized</span>
           </button>
         );
       })}
