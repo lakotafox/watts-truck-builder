@@ -1,26 +1,107 @@
 @import "tailwindcss";
 
+/* ---- Watts Automotive brand tokens ---- */
+@theme {
+  --color-ink: #0f1115;          /* near-black top bar / footer */
+  --color-ink-2: #16181d;
+  --color-steel: #1f2530;        /* dark panels */
+  --color-canvas: #ececec;       /* page background (matches site) */
+  --color-paper: #ffffff;
+  --color-brand: #283dc4;        /* THE Watts cobalt accent */
+  --color-brand-600: #2034a8;
+  --color-brand-700: #1a2b8c;
+  --color-accent: #c01622;       /* sparing red for hot CTAs */
+  --color-muted: #777777;
+  --color-line: #d7d7d7;
+
+  --font-sans: var(--font-roboto), "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: var(--color-canvas);
+  --foreground: #1a1a1a;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  border-color: var(--color-line);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
+
+/* Heavy condensed uppercase for the Watts-style display headings */
+.display {
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  line-height: 0.95;
+}
+
+.h-rule {
+  position: relative;
+}
+.h-rule::after {
+  content: "";
+  display: block;
+  width: 64px;
+  height: 4px;
+  background: var(--color-brand);
+  margin-top: 0.75rem;
+}
+.h-rule.center::after {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Brand button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.8rem;
+  padding: 0.85rem 1.5rem;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-brand {
+  background: var(--color-brand);
+  color: #fff;
+}
+.btn-brand:hover {
+  background: var(--color-brand-700);
+}
+.btn-dark {
+  background: var(--color-ink);
+  color: #fff;
+}
+.btn-dark:hover {
+  background: var(--color-brand);
+}
+.btn-ghost {
+  background: transparent;
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+}
+.btn-ghost:hover {
+  background: #fff;
+  color: var(--color-ink);
+}
+
+/* hide scrollbar on option rails */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
