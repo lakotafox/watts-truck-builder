@@ -153,10 +153,12 @@ export default function RideStylerStage() {
   const truck: RideStylerTruck =
     rideStylerTrucks.find((t) => t.id === truckId) ?? rideStylerTrucks[0];
 
-  // Keep the view valid for the selected truck (each config supports a subset of angles).
-  useEffect(() => {
-    if (!truck.views.includes(view)) setView(truck.views[0]);
-  }, [truck, view]);
+  // Selecting a truck: reset view to a supported angle and wheels to factory, then load wheels.
+  const selectTruck = useCallback((t: RideStylerTruck) => {
+    setTruckId(t.id);
+    setView(t.views[0]);
+    setWheelId("");
+  }, []);
 
   // Pull a real wheel list for the selected truck at runtime.
   useEffect(() => {
@@ -166,7 +168,6 @@ export default function RideStylerStage() {
       VehicleConfiguration: truckId,
       Count: "12",
     });
-    setWheelId(""); // reset to factory when the truck changes
     fetch(`${API_BASE}/Wheel/GetFitmentDescriptions?${params.toString()}`)
       .then((r) => r.json())
       .then((data) => {
@@ -198,10 +199,6 @@ export default function RideStylerStage() {
   );
   const renderUrl = useMemo(() => buildRenderUrl(spec), [spec]);
 
-  useEffect(() => {
-    setImgError(false);
-  }, [renderUrl]);
-
   // ---- Cache-warming prefetch (concurrency-capped) ----
   const prefetched = useRef<Set<string>>(new Set());
   const queue = useRef<string[]>([]);
@@ -209,20 +206,24 @@ export default function RideStylerStage() {
   const MAX_CONCURRENCY = 6;
 
   const pump = useCallback(() => {
-    while (active.current < MAX_CONCURRENCY && queue.current.length) {
-      const url = queue.current.shift()!;
-      if (prefetched.current.has(url)) continue;
-      prefetched.current.add(url);
-      active.current++;
-      const img = new window.Image();
-      const done = () => {
-        active.current--;
-        pump();
-      };
-      img.onload = done;
-      img.onerror = done;
-      img.src = url;
+    // Inner hoisted fn so the completion handler can re-pump without a self-reference.
+    function run() {
+      while (active.current < MAX_CONCURRENCY && queue.current.length) {
+        const url = queue.current.shift()!;
+        if (prefetched.current.has(url)) continue;
+        prefetched.current.add(url);
+        active.current += 1;
+        const img = new window.Image();
+        const done = () => {
+          active.current -= 1;
+          run();
+        };
+        img.onload = done;
+        img.onerror = done;
+        img.src = url;
+      }
     }
+    run();
   }, []);
 
   const enqueue = useCallback(
@@ -303,7 +304,7 @@ export default function RideStylerStage() {
               return (
                 <button
                   key={t.id}
-                  onClick={() => setTruckId(t.id)}
+                  onClick={() => selectTruck(t)}
                   className={`shrink-0 px-4 py-2 min-h-[44px] text-left border transition-colors ${
                     selected
                       ? "bg-brand text-white border-brand"
@@ -365,19 +366,21 @@ export default function RideStylerStage() {
               role={canRotate ? "button" : undefined}
               aria-label={canRotate ? "Tap to rotate the vehicle" : undefined}
             >
-              {/* Hidden loader drives the smooth swap (promote on load → no blank flash). */}
-              {!imgError && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={renderUrl}
-                  src={renderUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="hidden"
-                  onLoad={() => setDisplayedUrl(renderUrl)}
-                  onError={() => setImgError(true)}
-                />
-              )}
+              {/* Hidden loader drives the smooth swap (promote on load → no blank flash).
+                  Always mounted (keyed by URL) so a new spec re-attempts and clears errors. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                key={renderUrl}
+                src={renderUrl}
+                alt=""
+                aria-hidden="true"
+                className="hidden"
+                onLoad={() => {
+                  setDisplayedUrl(renderUrl);
+                  setImgError(false);
+                }}
+                onError={() => setImgError(true)}
+              />
 
               {firstLoad && !imgError && (
                 <div className="absolute inset-0 flex items-center justify-center">
