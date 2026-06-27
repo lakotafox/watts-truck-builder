@@ -192,11 +192,18 @@ once") drove this redesign:
 - **Collapsed picker.** After selection the big picker disappears; it's replaced by a slim
   bar overlaid on the render: the truck name (top-left) + a "Change" link (top-right) that
   reopens the step flow.
-- **Info overlaid on the render, no separate "Your build" card.** Truck name sits in a slim
-  strip at the TOP of the image; the live spec summary (paint swatch dot · paint · lift ·
-  wheels) sits in a slim strip at the BOTTOM. A compact "Request this build" CTA lives below.
-- **Compact color picker.** The 15 swatches are a single horizontal-scroll row
-  (`.no-scrollbar`) instead of a wrapping grid, saving vertical space.
+- **No page intro band.** The marketing intro band was removed from `page.tsx` entirely
+  (all breakpoints) so the page goes straight into the step-flow / builder with no gap.
+- **Info overlaid on the render, no separate "Your build" card.** Truck name + a "Change"
+  link sit in a slim bar at the TOP; the live spec summary (paint dot · paint · lift ·
+  wheels, plus a small "↻ Rotate" affordance) sits in a slim bar at the BOTTOM. The render
+  is **inset vertically** (`padClassName="py-12"` on the stage canvas) so the full vehicle
+  (roof to tires + shadow) sits *between* the bars and is never clipped. Compact "Request
+  this build" CTA below.
+- **Compact color & wheel pickers.** The 15 paint swatches AND the wheel options are each a
+  single horizontal-scroll row of `shrink-0` chips (`overflow-x-auto .no-scrollbar`) instead
+  of wrapping grids — wheel chips show brand (top) + model (bottom), tap to select, cobalt
+  selected state. Saves vertical space and keeps the truck high on screen.
 - **Truck stays visible while adjusting lift.** The render sits up top with the two
   live-preview controls (compact color row + lift slider) directly beneath, so the truck,
   the swatches and the slider all fit in one viewport — dragging the slider updates the

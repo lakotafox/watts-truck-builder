@@ -10,22 +10,6 @@ export const metadata: Metadata = {
 export default function BuildRideStylerPage() {
   return (
     <>
-      {/* Watts-style intro band */}
-      <section className="bg-canvas border-b border-line">
-        <div className="mx-auto max-w-7xl px-4 py-8 text-center">
-          <p className="text-xs uppercase tracking-widest text-brand font-bold">
-            Buy ours, or build yours · Live visualizer
-          </p>
-          <h1 className="display text-3xl md:text-5xl text-ink mt-1">Build Your Own Truck</h1>
-          <p className="text-muted max-w-2xl mx-auto mt-3">
-            Spec a custom rig the Watts way — pick your platform from Ford, Ram, GMC, Chevy, Toyota,
-            Jeep and Nissan, then choose your paint, dial in the lift, bolt on a set of wheels and tap
-            the truck to spin it. All rendered in real time. When it looks right, send us the build
-            for an exact quote. Powered by the RideStyler visualization platform.
-          </p>
-        </div>
-      </section>
-
       <RideStylerStage />
 
       {/* Reassurance band */}
