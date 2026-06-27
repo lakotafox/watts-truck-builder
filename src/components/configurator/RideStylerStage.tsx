@@ -439,10 +439,8 @@ export default function RideStylerStage() {
 
   const demoNote = () =>
     USING_DEMO_KEY ? (
-      <p className="text-[11px] leading-relaxed text-muted border-l-2 border-brand pl-3">
-        Developer preview — rendering through RideStyler&apos;s shared public demo key. For
-        production, set <code className="text-ink">NEXT_PUBLIC_RIDESTYLER_KEY</code> to a licensed
-        Watts Automotive account key. The embed is otherwise complete.
+      <p className="text-[11px] uppercase tracking-widest text-muted">
+        Demo · lakotafox.com
       </p>
     ) : null;
 
