@@ -178,12 +178,35 @@ visible element only on `onLoad`, so the previous render stays up until the next
   truck's `views` (side ↔ 3/4); a "Tap to rotate" badge + pointer cursor signals it, and the
   explicit angle toggle buttons remain. Because both angles are cache-warmed, the swap is
   instant. Only shown for trucks with >1 view.
-- **Mobile:** layout is single-column by default (picker → render → controls) and only
-  splits to the 2-up grid at `lg`. The render image is `w-full max-w-full h-auto
-  object-contain`, so it scales to the viewport and never overflows (verified no horizontal
-  scroll at 375px). Make tabs and the truck list are horizontal-scroll strips
-  (`.no-scrollbar`); swatches are 40px, picker/wheel buttons ≥44px tap targets with
-  `active:` states (no hover-only affordances).
+- **Desktop (lg+):** unchanged — truck picker on top, render card + side controls (the
+  "Your build" card, paint swatch grid, lift slider, wheel grid) below in a 2-up grid.
+
+### 6. Mobile UX — guided step-by-step builder (<lg)
+The mobile experience is a separate, purpose-built tree (`lg:hidden`); desktop (`hidden
+lg:block`) is untouched. Verified live at 375–390px width. User feedback ("too much at
+once") drove this redesign:
+- **Step flow before any truck is shown.** Step 1 "Choose your platform" = seven big
+  tappable make tiles (with model counts). Step 2 "Select your {make}" = a clean card list
+  of that make's models/years with a "‹ All platforms" back link. The full configurator is
+  only revealed once a truck is locked in.
+- **Collapsed picker.** After selection the big picker disappears; it's replaced by a slim
+  bar overlaid on the render: the truck name (top-left) + a "Change" link (top-right) that
+  reopens the step flow.
+- **Info overlaid on the render, no separate "Your build" card.** Truck name sits in a slim
+  strip at the TOP of the image; the live spec summary (paint swatch dot · paint · lift ·
+  wheels) sits in a slim strip at the BOTTOM. A compact "Request this build" CTA lives below.
+- **Compact color picker.** The 15 swatches are a single horizontal-scroll row
+  (`.no-scrollbar`) instead of a wrapping grid, saving vertical space.
+- **Truck stays visible while adjusting lift.** The render sits up top with the two
+  live-preview controls (compact color row + lift slider) directly beneath, so the truck,
+  the swatches and the slider all fit in one viewport — dragging the slider updates the
+  truck live without scrolling it out of view (confirmed: 5"→12" lift updated in place).
+  Note: we deliberately did **not** use `position: sticky` for the render — the site shell
+  already has a sticky top header, and a tall pinned render would both collide with it and
+  cover the controls scrolling underneath. Placing the live controls adjacent achieves the
+  same goal robustly.
+- **Tap-to-rotate** works on touch (the image cycles camera angles); 40px swatches and
+  ≥44px tap targets with `active:` states throughout; no horizontal overflow at 375px.
 
 ---
 

@@ -17,14 +17,20 @@
  *   lift offset (no dataset clamp; exposed 0–12). There is NO trim/secondary-color param,
  *   so two-tone/blackout is not natively supported (see RIDESTYLER_NOTES.md).
  *
+ * Layout:
+ *   - Desktop (lg+): two-up — truck picker on top, render + side controls below. Unchanged.
+ *   - Mobile (<lg): a guided, premium step flow — choose platform → choose truck → reveal a
+ *     big sticky render with minimal overlaid info (name top, spec strip bottom) and compact,
+ *     non-crowding controls. The render stays pinned while controls scroll, so the lift slider
+ *     updates the truck live in view.
+ *
  * Catalog: src/lib/configurator/rideStylerTrucks.ts — every entry was verified to return
  *   a real render (not the "no image" placeholder) before inclusion.
  *
  * Performance: we cache-warm the browser HTTP cache by background-prefetching the render
  *   URLs for adjacent choices (all wheels, all camera angles, all colors) the moment a
  *   truck is selected and whenever the truck/lift/color changes — concurrency-capped at 6,
- *   de-duped by URL (URLs embed the truck id, so re-selecting a truck never refetches).
- *   Clicks then swap to an already-cached image. The visible <img> never blanks.
+ *   de-duped by URL. Clicks then swap to an already-cached image. The visible <img> never blanks.
  *
  * Auth: every request carries an account Key, read from NEXT_PUBLIC_RIDESTYLER_KEY with a
  *   public demo-key fallback so the page renders live out of the box.
@@ -50,6 +56,11 @@ const USING_DEMO_KEY = !process.env.NEXT_PUBLIC_RIDESTYLER_KEY;
 const DEFAULT_TRUCK_ID =
   rideStylerTrucks.find((t) => t.model === "F-350 Super Duty")?.id ??
   rideStylerTrucks[0].id;
+
+// Model count per make, for the mobile platform tiles.
+const MAKE_COUNTS: Record<string, number> = Object.fromEntries(
+  rideStylerMakes.map((mk) => [mk, rideStylerTrucks.filter((t) => t.make === mk).length]),
+);
 
 // Ford/Watts-style paint palette. Every hex renders correctly (PaintColor takes arbitrary
 // hex — confirmed live). Cobalt leads (the Watts accent).
@@ -97,6 +108,8 @@ const FALLBACK_WHEELS: Wheel[] = [
 
 const RENDER_W = 1000;
 const RENDER_H = 620;
+const STAGE_BG =
+  "radial-gradient(120% 90% at 50% 35%, #ffffff 0%, #f1f1f1 55%, #e2e2e2 100%)";
 
 type Spec = {
   truckId: string;
@@ -134,6 +147,14 @@ function RotateIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function ChevronIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export default function RideStylerStage() {
   const [truckId, setTruckId] = useState(DEFAULT_TRUCK_ID);
   const [paint, setPaint] = useState("#283dc4"); // Watts Cobalt
@@ -143,6 +164,10 @@ export default function RideStylerStage() {
   const [activeMake, setActiveMake] = useState(
     rideStylerTrucks.find((t) => t.id === DEFAULT_TRUCK_ID)?.make ?? rideStylerMakes[0],
   );
+
+  // Mobile-only guided flow. Desktop ignores these entirely.
+  const [mobileTruckLocked, setMobileTruckLocked] = useState(false);
+  const [mobileStep, setMobileStep] = useState<"make" | "truck">("make");
 
   const [wheels, setWheels] = useState<Wheel[]>(FALLBACK_WHEELS);
 
@@ -158,6 +183,23 @@ export default function RideStylerStage() {
     setTruckId(t.id);
     setView(t.views[0]);
     setWheelId("");
+  }, []);
+
+  // Mobile flow handlers.
+  const pickMake = useCallback((mk: string) => {
+    setActiveMake(mk);
+    setMobileStep("truck");
+  }, []);
+  const pickTruckMobile = useCallback(
+    (t: RideStylerTruck) => {
+      selectTruck(t);
+      setMobileTruckLocked(true);
+    },
+    [selectTruck],
+  );
+  const reopenPicker = useCallback(() => {
+    setMobileTruckLocked(false);
+    setMobileStep("truck");
   }, []);
 
   // Pull a real wheel list for the selected truck at runtime.
@@ -273,15 +315,135 @@ export default function RideStylerStage() {
 
   const trucksForMake = rideStylerTrucks.filter((t) => t.make === activeMake);
 
+  const mailtoHref =
+    `mailto:sales@wattsautomotive.com?subject=${encodeURIComponent(
+      `Custom ${truck.make} ${truck.model} build request`,
+    )}&body=${encodeURIComponent(
+      `I'd like a quote on this build:\n\nVehicle: ${truck.label}\nPaint: ${activePaint}\nLift: ${activeLift}\nWheels: ${activeWheel}\n`,
+    )}`;
+
+  const imgAlt = `${truck.label} in ${activePaint} with ${activeLift} and ${activeWheel} wheels`;
+
+  // Shared control bodies — defined as helper functions and CALLED (not rendered as
+  // <Components/>), so the elements reconcile by position across renders. This is critical
+  // for the lift <input type="range">: rendering it via a nested component type would remount
+  // it on every setLift and drop focus mid-drag.
+  const paintSwatches = (scroll: boolean) => (
+    <div
+      className={
+        scroll
+          ? "flex gap-2.5 overflow-x-auto no-scrollbar -mx-1 px-1 py-0.5"
+          : "flex flex-wrap gap-2.5"
+      }
+    >
+      {PAINTS.map((p) => (
+        <button
+          key={p.hex}
+          title={p.name}
+          onClick={() => setPaint(p.hex)}
+          className={`shrink-0 w-10 h-10 rounded-full border transition-transform ${
+            paint === p.hex
+              ? "ring-2 ring-brand ring-offset-2 ring-offset-canvas scale-110"
+              : "border-line active:scale-105 hover:scale-105"
+          }`}
+          style={{ background: p.hex }}
+          aria-label={p.name}
+        />
+      ))}
+    </div>
+  );
+
+  const liftSlider = () => (
+    <>
+      <input
+        type="range"
+        min={0}
+        max={LIFT_MAX}
+        step={1}
+        value={lift}
+        onChange={(e) => setLift(Number(e.target.value))}
+        className="w-full h-2 accent-brand cursor-pointer"
+        aria-label="Lift height"
+      />
+      <div className="flex justify-between mt-1 text-[10px] uppercase tracking-wider text-muted">
+        <span>Stock</span>
+        <span>{liftLabel(Math.round(LIFT_MAX / 2))}</span>
+        <span>{liftLabel(LIFT_MAX)}</span>
+      </div>
+    </>
+  );
+
+  const wheelGrid = () => (
+    <div className="grid grid-cols-2 gap-2">
+      <button
+        onClick={() => setWheelId("")}
+        className={`px-3 py-2 min-h-[44px] text-xs font-semibold text-left border transition-colors ${
+          wheelId === ""
+            ? "bg-brand text-white border-brand"
+            : "bg-white text-ink border-line hover:border-brand"
+        }`}
+      >
+        Factory wheels
+      </button>
+      {wheels.map((w) => (
+        <button
+          key={w.WheelFitmentID}
+          onClick={() => setWheelId(w.WheelFitmentID)}
+          className={`px-3 py-2 min-h-[44px] text-xs font-semibold text-left border transition-colors ${
+            wheelId === w.WheelFitmentID
+              ? "bg-brand text-white border-brand"
+              : "bg-white text-ink border-line hover:border-brand"
+          }`}
+        >
+          <span className="block truncate">{w.WheelBrandName}</span>
+          <span className="block truncate opacity-70">{w.WheelModelName}</span>
+        </button>
+      ))}
+    </div>
+  );
+
+  const demoNote = () =>
+    USING_DEMO_KEY ? (
+      <p className="text-[11px] leading-relaxed text-muted border-l-2 border-brand pl-3">
+        Developer preview — rendering through RideStyler&apos;s shared public demo key. For
+        production, set <code className="text-ink">NEXT_PUBLIC_RIDESTYLER_KEY</code> to a licensed
+        Watts Automotive account key. The embed is otherwise complete.
+      </p>
+    ) : null;
+
   return (
     <section className="bg-canvas">
-      <div className="mx-auto max-w-7xl px-4 py-6 lg:py-10">
-        {/* ---------------- Truck / model picker ---------------- */}
+      {/* Single hidden loader drives the smooth swap for BOTH layouts (promote on load →
+          no blank flash). Always mounted, keyed by URL, so a new spec re-attempts and clears
+          errors. Cached/preloaded images are often `complete` before onLoad attaches, so we
+          also promote synchronously via ref. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        key={renderUrl}
+        src={renderUrl}
+        alt=""
+        aria-hidden="true"
+        className="hidden"
+        ref={(node) => {
+          if (node && node.complete && node.naturalWidth > 0) {
+            setDisplayedUrl(renderUrl);
+            setImgError(false);
+          }
+        }}
+        onLoad={() => {
+          setDisplayedUrl(renderUrl);
+          setImgError(false);
+        }}
+        onError={() => setImgError(true)}
+      />
+
+      {/* ============================ DESKTOP (lg+) ============================ */}
+      <div className="hidden lg:block mx-auto max-w-7xl px-4 py-10">
+        {/* Truck / model picker */}
         <div className="mb-6">
           <p className="text-[11px] uppercase tracking-widest font-bold text-muted mb-2">
             Choose your platform · {rideStylerTrucks.length} models
           </p>
-          {/* Make tabs */}
           <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
             {rideStylerMakes.map((mk) => (
               <button
@@ -297,7 +459,6 @@ export default function RideStylerStage() {
               </button>
             ))}
           </div>
-          {/* Trucks for active make */}
           <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 mt-2 pb-1">
             {trucksForMake.map((t) => {
               const selected = t.id === truckId;
@@ -314,9 +475,7 @@ export default function RideStylerStage() {
                   <span className="block text-sm font-bold leading-tight whitespace-nowrap">
                     {t.model}
                   </span>
-                  <span
-                    className={`block text-[11px] ${selected ? "text-white/70" : "text-muted"}`}
-                  >
+                  <span className={`block text-[11px] ${selected ? "text-white/70" : "text-muted"}`}>
                     {t.year}
                   </span>
                 </button>
@@ -325,8 +484,7 @@ export default function RideStylerStage() {
           </div>
         </div>
 
-        {/* ---------------- Stage + controls ---------------- */}
-        <div className="grid lg:grid-cols-[1.55fr_1fr] gap-6">
+        <div className="grid grid-cols-[1.55fr_1fr] gap-6">
           {/* Stage */}
           <div className="bg-white border border-line shadow-card overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-line gap-2">
@@ -353,95 +511,36 @@ export default function RideStylerStage() {
               )}
             </div>
 
-            <div
-              className={`relative flex-1 flex items-center justify-center select-none ${
-                canRotate ? "cursor-pointer" : ""
-              }`}
-              style={{
-                minHeight: 300,
-                background:
-                  "radial-gradient(120% 90% at 50% 35%, #ffffff 0%, #f1f1f1 55%, #e2e2e2 100%)",
-              }}
+            <StageCanvas
+              displayedUrl={displayedUrl}
+              alt={imgAlt}
+              firstLoad={firstLoad}
+              imgError={imgError}
+              updating={updating}
+              clickable={canRotate}
               onClick={rotate}
-              role={canRotate ? "button" : undefined}
-              aria-label={canRotate ? "Tap to rotate the vehicle" : undefined}
+              minHeight={300}
+              imgMaxClass="max-h-[58vh]"
             >
-              {/* Hidden loader drives the smooth swap (promote on load → no blank flash).
-                  Always mounted (keyed by URL) so a new spec re-attempts and clears errors. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                key={renderUrl}
-                src={renderUrl}
-                alt=""
-                aria-hidden="true"
-                className="hidden"
-                ref={(node) => {
-                  // Cached images (the preloader warms them) are often already
-                  // `complete` before React attaches onLoad, so onLoad never
-                  // fires. Promote immediately when the element is already loaded.
-                  if (node && node.complete && node.naturalWidth > 0) {
-                    setDisplayedUrl(renderUrl);
-                    setImgError(false);
-                  }
-                }}
-                onLoad={() => {
-                  setDisplayedUrl(renderUrl);
-                  setImgError(false);
-                }}
-                onError={() => setImgError(true)}
-              />
-
-              {firstLoad && !imgError && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="h-8 w-8 border-2 border-line border-t-brand rounded-full animate-spin" />
-                </div>
-              )}
-
-              {imgError ? (
-                <div className="text-center px-6 py-12">
-                  <p className="text-sm text-muted">
-                    Couldn&apos;t reach the RideStyler render service for this combination.
-                    Try another paint, wheel or angle.
-                  </p>
-                </div>
-              ) : (
-                displayedUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={displayedUrl}
-                    alt={`${truck.label} in ${activePaint} with ${activeLift} and ${activeWheel} wheels`}
-                    className="w-full max-w-full h-auto max-h-[58vh] object-contain pointer-events-none"
-                  />
-                )
-              )}
-
-              {/* Tap-to-rotate affordance */}
               {canRotate && !firstLoad && (
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-ink/85 text-white px-3 py-1.5 text-[10px] uppercase tracking-widest pointer-events-none">
                   <RotateIcon className="w-3.5 h-3.5" />
                   Tap to rotate
                 </div>
               )}
-
-              {updating && !firstLoad && (
-                <div className="absolute top-3 left-3 flex items-center gap-2 bg-white/85 px-2.5 py-1 text-[10px] uppercase tracking-widest text-muted pointer-events-none">
-                  <span className="h-3 w-3 border-2 border-line border-t-brand rounded-full animate-spin" />
-                  Updating
-                </div>
-              )}
-
               <div className="absolute bottom-3 right-3 text-[10px] uppercase tracking-widest text-muted/70 pointer-events-none">
                 Live render · RideStyler
               </div>
-            </div>
+            </StageCanvas>
           </div>
 
           {/* Controls */}
           <div className="flex flex-col gap-5">
-            {/* Spec summary */}
             <div className="bg-ink text-white p-5">
               <p className="text-[11px] uppercase tracking-widest text-white/50">Your build</p>
-              <h2 className="display text-2xl mt-1">{truck.make} {truck.model}</h2>
+              <h2 className="display text-2xl mt-1">
+                {truck.make} {truck.model}
+              </h2>
               <dl className="mt-4 grid grid-cols-2 gap-y-2 gap-x-4 text-sm">
                 <dt className="text-white/50">Paint</dt>
                 <dd className="text-right font-semibold">{activePaint}</dd>
@@ -450,98 +549,226 @@ export default function RideStylerStage() {
                 <dt className="text-white/50">Wheels</dt>
                 <dd className="text-right font-semibold truncate">{activeWheel}</dd>
               </dl>
-              <a
-                href={`mailto:sales@wattsautomotive.com?subject=${encodeURIComponent(
-                  `Custom ${truck.make} ${truck.model} build request`,
-                )}&body=${encodeURIComponent(
-                  `I'd like a quote on this build:\n\nVehicle: ${truck.label}\nPaint: ${activePaint}\nLift: ${activeLift}\nWheels: ${activeWheel}\n`,
-                )}`}
-                className="btn btn-brand w-full mt-5"
-              >
+              <a href={mailtoHref} className="btn btn-brand w-full mt-5">
                 Request This Build
               </a>
             </div>
 
-            {/* Paint */}
-            <Field label={`Paint · ${activePaint}`}>
-              <div className="flex flex-wrap gap-2.5">
-                {PAINTS.map((p) => (
-                  <button
-                    key={p.hex}
-                    title={p.name}
-                    onClick={() => setPaint(p.hex)}
-                    className={`w-10 h-10 rounded-full border transition-transform ${
-                      paint === p.hex
-                        ? "ring-2 ring-brand ring-offset-2 ring-offset-canvas scale-110"
-                        : "border-line active:scale-105 hover:scale-105"
-                    }`}
-                    style={{ background: p.hex }}
-                    aria-label={p.name}
-                  />
-                ))}
-              </div>
-            </Field>
+            <Field label={`Paint · ${activePaint}`}>{paintSwatches(false)}</Field>
 
-            {/* Lift — full ladder via slider (every level 0..12) */}
-            <Field label={`Suspension · ${activeLift}`}>
-              <input
-                type="range"
-                min={0}
-                max={LIFT_MAX}
-                step={1}
-                value={lift}
-                onChange={(e) => setLift(Number(e.target.value))}
-                className="w-full h-2 accent-brand cursor-pointer"
-                aria-label="Lift height"
-              />
-              <div className="flex justify-between mt-1 text-[10px] uppercase tracking-wider text-muted">
-                <span>Stock</span>
-                <span>{liftLabel(Math.round(LIFT_MAX / 2))}</span>
-                <span>{liftLabel(LIFT_MAX)}</span>
-              </div>
-            </Field>
+            <Field label={`Suspension · ${activeLift}`}>{liftSlider()}</Field>
 
-            {/* Wheels */}
-            <Field label={`Wheels · ${activeWheel}`}>
-              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
-                <button
-                  onClick={() => setWheelId("")}
-                  className={`px-3 py-2 min-h-[44px] text-xs font-semibold text-left border transition-colors ${
-                    wheelId === ""
-                      ? "bg-brand text-white border-brand"
-                      : "bg-white text-ink border-line hover:border-brand"
-                  }`}
-                >
-                  Factory wheels
-                </button>
-                {wheels.map((w) => (
-                  <button
-                    key={w.WheelFitmentID}
-                    onClick={() => setWheelId(w.WheelFitmentID)}
-                    className={`px-3 py-2 min-h-[44px] text-xs font-semibold text-left border transition-colors ${
-                      wheelId === w.WheelFitmentID
-                        ? "bg-brand text-white border-brand"
-                        : "bg-white text-ink border-line hover:border-brand"
-                    }`}
-                  >
-                    <span className="block truncate">{w.WheelBrandName}</span>
-                    <span className="block truncate opacity-70">{w.WheelModelName}</span>
-                  </button>
-                ))}
-              </div>
-            </Field>
+            <Field label={`Wheels · ${activeWheel}`}>{wheelGrid()}</Field>
 
-            {USING_DEMO_KEY && (
-              <p className="text-[11px] leading-relaxed text-muted border-l-2 border-brand pl-3">
-                Developer preview — rendering through RideStyler&apos;s shared public demo key.
-                For production, set <code className="text-ink">NEXT_PUBLIC_RIDESTYLER_KEY</code> to a
-                licensed Watts Automotive account key. The embed is otherwise complete.
-              </p>
-            )}
+            {demoNote()}
           </div>
         </div>
       </div>
+
+      {/* ============================ MOBILE (<lg) ============================ */}
+      <div className="lg:hidden">
+        {!mobileTruckLocked ? (
+          /* ---- Guided step flow ---- */
+          <div className="mx-auto max-w-xl px-4 py-6">
+            {mobileStep === "make" ? (
+              <div>
+                <p className="text-[11px] uppercase tracking-widest font-bold text-brand">Step 1 of 2</p>
+                <h2 className="display text-2xl text-ink mt-1">Choose your platform</h2>
+                <p className="text-sm text-muted mt-1">
+                  {rideStylerTrucks.length} models across {rideStylerMakes.length} brands.
+                </p>
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  {rideStylerMakes.map((mk) => (
+                    <button
+                      key={mk}
+                      onClick={() => pickMake(mk)}
+                      className="group bg-white border border-line shadow-card px-4 py-6 text-left transition-colors hover:border-brand active:bg-canvas"
+                    >
+                      <span className="display block text-xl text-ink">{mk}</span>
+                      <span className="block text-[11px] uppercase tracking-wider text-muted mt-1">
+                        {MAKE_COUNTS[mk]} {MAKE_COUNTS[mk] === 1 ? "model" : "models"}
+                      </span>
+                      <span className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-brand">
+                        Select <ChevronIcon className="w-3 h-3" />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <button
+                  onClick={() => setMobileStep("make")}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-muted hover:text-ink"
+                >
+                  <ChevronIcon className="w-3 h-3 rotate-180" /> All platforms
+                </button>
+                <p className="text-[11px] uppercase tracking-widest font-bold text-brand mt-3">Step 2 of 2</p>
+                <h2 className="display text-2xl text-ink mt-1">Select your {activeMake}</h2>
+                <div className="flex flex-col gap-2 mt-4">
+                  {trucksForMake.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => pickTruckMobile(t)}
+                      className="flex items-center justify-between gap-3 bg-white border border-line shadow-card px-4 min-h-[60px] text-left transition-colors hover:border-brand active:bg-canvas"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-base font-bold text-ink leading-tight">{t.model}</span>
+                        <span className="block text-[11px] uppercase tracking-wider text-muted">{t.year}</span>
+                      </span>
+                      <ChevronIcon className="w-4 h-4 text-brand shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* ---- Builder: big render up top with the live-preview controls (paint + lift)
+                 directly beneath, so the truck stays in view while you adjust them. (We avoid
+                 position:sticky here — the site shell already has a sticky header, and a tall
+                 pinned render would cover the controls scrolling under it.) ---- */
+          <div className="px-4 pb-8 pt-3">
+            {/* Render with minimal overlaid info (name+Change top, spec strip bottom) */}
+            <div className="mb-4">
+              <div className="bg-white border border-line shadow-card overflow-hidden">
+                <StageCanvas
+                  displayedUrl={displayedUrl}
+                  alt={imgAlt}
+                  firstLoad={firstLoad}
+                  imgError={imgError}
+                  updating={updating}
+                  clickable={canRotate}
+                  onClick={rotate}
+                  minHeight={200}
+                  imgMaxClass="max-h-[38vh]"
+                >
+                  {/* Top: name + Change (replaces the big picker) */}
+                  <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-2 bg-ink/85 text-white px-3 py-2 pointer-events-none">
+                    <span className="text-xs font-bold uppercase tracking-wide truncate">{truck.label}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        reopenPicker();
+                      }}
+                      className="shrink-0 text-[11px] font-bold uppercase tracking-wider underline underline-offset-2 pointer-events-auto"
+                    >
+                      Change
+                    </button>
+                  </div>
+
+                  {/* Rotate hint, sits just above the spec strip */}
+                  {canRotate && !firstLoad && (
+                    <div className="absolute left-1/2 -translate-x-1/2 bottom-11 flex items-center gap-1.5 bg-white/85 text-ink px-2.5 py-1 text-[10px] uppercase tracking-widest pointer-events-none">
+                      <RotateIcon className="w-3 h-3" />
+                      Tap to rotate
+                    </div>
+                  )}
+
+                  {/* Bottom: slim spec strip */}
+                  <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-ink/85 text-white px-3 py-2 text-[11px] pointer-events-none">
+                    <span
+                      className="inline-block w-3 h-3 rounded-full border border-white/40 shrink-0"
+                      style={{ background: paint }}
+                    />
+                    <span className="truncate">{activePaint}</span>
+                    <span className="opacity-40">·</span>
+                    <span className="whitespace-nowrap">{activeLift}</span>
+                    <span className="opacity-40">·</span>
+                    <span className="truncate">{activeWheel}</span>
+                  </div>
+                </StageCanvas>
+              </div>
+            </div>
+
+            {/* Compact controls — paint & lift first (live preview), then wheels + CTA */}
+            <div className="flex flex-col gap-5">
+              <Field label={`Paint · ${activePaint}`}>{paintSwatches(true)}</Field>
+
+              <Field label={`Suspension · ${activeLift}`}>{liftSlider()}</Field>
+
+              <Field label={`Wheels · ${activeWheel}`}>{wheelGrid()}</Field>
+
+              <a href={mailtoHref} className="btn btn-brand w-full">
+                Request This Build
+              </a>
+
+              {demoNote()}
+            </div>
+          </div>
+        )}
+      </div>
     </section>
+  );
+}
+
+function StageCanvas({
+  displayedUrl,
+  alt,
+  firstLoad,
+  imgError,
+  updating,
+  clickable,
+  onClick,
+  minHeight,
+  imgMaxClass,
+  children,
+}: {
+  displayedUrl: string;
+  alt: string;
+  firstLoad: boolean;
+  imgError: boolean;
+  updating: boolean;
+  clickable: boolean;
+  onClick: () => void;
+  minHeight: number;
+  imgMaxClass: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`relative flex-1 flex items-center justify-center select-none overflow-hidden ${
+        clickable ? "cursor-pointer" : ""
+      }`}
+      style={{ minHeight, background: STAGE_BG }}
+      onClick={onClick}
+      role={clickable ? "button" : undefined}
+      aria-label={clickable ? "Tap to rotate the vehicle" : undefined}
+    >
+      {firstLoad && !imgError && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="h-8 w-8 border-2 border-line border-t-brand rounded-full animate-spin" />
+        </div>
+      )}
+
+      {imgError ? (
+        <div className="text-center px-6 py-12">
+          <p className="text-sm text-muted">
+            Couldn&apos;t reach the RideStyler render service for this combination. Try another
+            paint, wheel or angle.
+          </p>
+        </div>
+      ) : (
+        displayedUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={displayedUrl}
+            alt={alt}
+            className={`w-full max-w-full h-auto object-contain pointer-events-none ${imgMaxClass}`}
+          />
+        )
+      )}
+
+      {updating && !firstLoad && (
+        // Positioned below any top overlay bar so it never collides on mobile.
+        <div className="absolute top-11 left-2 flex items-center gap-2 bg-white/85 px-2.5 py-1 text-[10px] uppercase tracking-widest text-muted pointer-events-none">
+          <span className="h-3 w-3 border-2 border-line border-t-brand rounded-full animate-spin" />
+          Updating
+        </div>
+      )}
+
+      {children}
+    </div>
   );
 }
 
