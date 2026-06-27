@@ -106,6 +106,13 @@ const FALLBACK_WHEELS: Wheel[] = [
   { WheelFitmentID: "097f7a29-2cf2-46b2-be8a-174166f3dd19", WheelBrandName: "American Racing", WheelModelName: "AR62 Outlaw II" },
 ];
 
+// A factory tire/fitment package for the vehicle (RideStyler `VehicleTireOption`).
+// `od` = tire outside diameter (in), `rim` = wheel diameter (in). These are the ONLY
+// tire sizes RideStyler's render exposes for a vehicle (stock fitments — typically 31–34";
+// there is no aftermarket 35/37/40" tire param). A VehicleTireOption only affects the render
+// when NO aftermarket WheelFitment is selected (a wheel fitment carries its own tire).
+type TireOpt = { id: string; od: number; rim: number };
+
 const RENDER_W = 1000;
 const RENDER_H = 620;
 const STAGE_BG =
@@ -116,6 +123,7 @@ type Spec = {
   paint: string;
   lift: number;
   wheelId: string;
+  tireOptionId: string; // "" = stock/default factory tire
   view: RideStylerView;
 };
 
@@ -129,7 +137,12 @@ function buildRenderUrl(s: Spec): string {
   p.set("Height", String(RENDER_H));
   p.set("IncludeShadow", "true");
   if (s.lift > 0) p.set("Suspension", String(s.lift));
-  if (s.wheelId) p.set("WheelFitment", s.wheelId);
+  if (s.wheelId) {
+    // Aftermarket wheel governs the tire — VehicleTireOption is ignored by the API here.
+    p.set("WheelFitment", s.wheelId);
+  } else if (s.tireOptionId) {
+    p.set("VehicleTireOption", s.tireOptionId);
+  }
   return `${API_BASE}/Vehicle/Render?${p.toString()}`;
 }
 
@@ -170,6 +183,8 @@ export default function RideStylerStage() {
   const [mobileStep, setMobileStep] = useState<"make" | "truck">("make");
 
   const [wheels, setWheels] = useState<Wheel[]>(FALLBACK_WHEELS);
+  const [tireOptions, setTireOptions] = useState<TireOpt[]>([]);
+  const [tireOptionId, setTireOptionId] = useState<string>(""); // "" = stock/default
 
   // Smooth swap: the visible image always shows the last fully-loaded URL.
   const [displayedUrl, setDisplayedUrl] = useState<string>("");
@@ -178,11 +193,12 @@ export default function RideStylerStage() {
   const truck: RideStylerTruck =
     rideStylerTrucks.find((t) => t.id === truckId) ?? rideStylerTrucks[0];
 
-  // Selecting a truck: reset view to a supported angle and wheels to factory, then load wheels.
+  // Selecting a truck: reset view to a supported angle, wheels to factory, tire to stock.
   const selectTruck = useCallback((t: RideStylerTruck) => {
     setTruckId(t.id);
     setView(t.views[0]);
     setWheelId("");
+    setTireOptionId("");
   }, []);
 
   // Mobile flow handlers.
@@ -234,10 +250,35 @@ export default function RideStylerStage() {
     };
   }, [truckId]);
 
+  // Pull the vehicle's factory tire/fitment packages (the only tire sizes the render exposes).
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({ Key: RIDESTYLER_KEY, VehicleConfiguration: truckId });
+    fetch(`${API_BASE}/Vehicle/GetTireOptionDetails?${params.toString()}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const details = Array.isArray(data?.Details) ? data.Details : [];
+        const opts: TireOpt[] = details
+          .map((d: { TireOptionID: string; Front?: { OutsideDiameter?: number; InsideDiameter?: number } }) => ({
+            id: d.TireOptionID,
+            od: d.Front?.OutsideDiameter ?? 0,
+            rim: d.Front?.InsideDiameter ?? 0,
+          }))
+          .filter((o: TireOpt) => o.id && o.od > 0)
+          .sort((a: TireOpt, b: TireOpt) => a.od - b.od);
+        setTireOptions(opts);
+      })
+      .catch(() => setTireOptions([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [truckId]);
+
   const safeView: RideStylerView = truck.views.includes(view) ? view : truck.views[0];
   const spec: Spec = useMemo(
-    () => ({ truckId, paint, lift, wheelId, view: safeView }),
-    [truckId, paint, lift, wheelId, safeView],
+    () => ({ truckId, paint, lift, wheelId, tireOptionId, view: safeView }),
+    [truckId, paint, lift, wheelId, tireOptionId, safeView],
   );
   const renderUrl = useMemo(() => buildRenderUrl(spec), [spec]);
 
@@ -295,8 +336,12 @@ export default function RideStylerStage() {
     const rest: string[] = [];
     for (const v of truck.views) rest.push(buildRenderUrl({ ...spec, view: v }));
     for (const c of PAINTS) rest.push(buildRenderUrl({ ...spec, paint: c.hex }));
+    // Factory tire packages (only render on factory wheels).
+    for (const t of tireOptions) {
+      rest.push(buildRenderUrl({ ...spec, wheelId: "", tireOptionId: t.id }));
+    }
     enqueue(rest);
-  }, [spec, wheels, truck, enqueue]);
+  }, [spec, wheels, tireOptions, truck, enqueue]);
 
   const updating = displayedUrl !== renderUrl && !imgError;
   const firstLoad = displayedUrl === "";
@@ -316,6 +361,14 @@ export default function RideStylerStage() {
         return w ? `${w.WheelBrandName ?? ""} ${w.WheelModelName ?? ""}`.trim() : "Custom";
       })()
     : "Factory";
+
+  // Tire size only applies on factory wheels (aftermarket wheels carry their own tire).
+  const hasTireControl = tireOptions.length > 1;
+  const tireGovernedByWheel = !!wheelId;
+  const selectedTire =
+    (tireOptionId ? tireOptions.find((t) => t.id === tireOptionId) : tireOptions[0]) ?? null;
+  const activeTireLabel =
+    tireGovernedByWheel || !selectedTire ? null : `${Math.round(selectedTire.od)}"`;
 
   const trucksForMake = rideStylerTrucks.filter((t) => t.make === activeMake);
 
@@ -434,6 +487,38 @@ export default function RideStylerStage() {
           <span className="block truncate opacity-70">{w.WheelModelName}</span>
         </button>
       ))}
+    </div>
+  );
+
+  // Tire size = the vehicle's factory tire packages (`VehicleTireOption`). These are the
+  // only tire diameters RideStyler's render exposes (stock ~31–34"); picking one switches
+  // back to factory wheels so it actually applies. Dimmed when an aftermarket wheel is set.
+  const tireControl = (scroll: boolean) => (
+    <div
+      className={`${
+        scroll ? "flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 py-0.5" : "flex flex-wrap gap-2"
+      } ${tireGovernedByWheel ? "opacity-50" : ""}`}
+    >
+      {tireOptions.map((t, i) => {
+        const selected = tireOptionId ? tireOptionId === t.id : i === 0;
+        return (
+          <button
+            key={t.id}
+            onClick={() => {
+              setTireOptionId(i === 0 ? "" : t.id);
+              setWheelId(""); // tire packages only render on factory wheels
+            }}
+            className={`shrink-0 w-[92px] px-3 py-2 min-h-[48px] text-xs font-semibold text-left border transition-colors ${
+              selected && !tireGovernedByWheel
+                ? "bg-brand text-white border-brand"
+                : "bg-white text-ink border-line active:border-brand"
+            }`}
+          >
+            <span className="block truncate">{Math.round(t.od)}&quot;</span>
+            <span className="block truncate opacity-70">{t.rim}&quot; wheel</span>
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -579,6 +664,12 @@ export default function RideStylerStage() {
                 <dd className="text-right font-semibold">{activePaint}</dd>
                 <dt className="text-white/50">Lift</dt>
                 <dd className="text-right font-semibold">{activeLift}</dd>
+                {hasTireControl && (
+                  <>
+                    <dt className="text-white/50">Tires</dt>
+                    <dd className="text-right font-semibold">{activeTireLabel ?? "Per wheel"}</dd>
+                  </>
+                )}
                 <dt className="text-white/50">Wheels</dt>
                 <dd className="text-right font-semibold truncate">{activeWheel}</dd>
               </dl>
@@ -590,6 +681,12 @@ export default function RideStylerStage() {
             <Field label={`Paint · ${activePaint}`}>{paintSwatches(false)}</Field>
 
             <Field label={`Suspension · ${activeLift}`}>{liftSlider()}</Field>
+
+            {hasTireControl && (
+              <Field label={`Tire size · ${activeTireLabel ?? "set by wheel"}`}>
+                {tireControl(false)}
+              </Field>
+            )}
 
             <Field label={`Wheels · ${activeWheel}`}>{wheelGrid()}</Field>
 
@@ -700,6 +797,12 @@ export default function RideStylerStage() {
                     <span className="truncate">{activePaint}</span>
                     <span className="opacity-40">·</span>
                     <span className="whitespace-nowrap">{activeLift}</span>
+                    {activeTireLabel && (
+                      <>
+                        <span className="opacity-40">·</span>
+                        <span className="whitespace-nowrap">{activeTireLabel} tires</span>
+                      </>
+                    )}
                     <span className="opacity-40">·</span>
                     <span className="truncate">{activeWheel}</span>
                     {canRotate && (
@@ -718,6 +821,12 @@ export default function RideStylerStage() {
               <Field label={`Paint · ${activePaint}`}>{paintSwatches(true)}</Field>
 
               <Field label={`Suspension · ${activeLift}`}>{liftSlider()}</Field>
+
+              {hasTireControl && (
+                <Field label={`Tire size · ${activeTireLabel ?? "set by wheel"}`}>
+                  {tireControl(true)}
+                </Field>
+              )}
 
               <Field label={`Wheels · ${activeWheel}`}>{wheelRow()}</Field>
 

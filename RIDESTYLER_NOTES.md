@@ -215,6 +215,41 @@ once") drove this redesign:
 - **Tap-to-rotate** works on touch (the image cycles camera angles); 40px swatches and
   ≥44px tap targets with `active:` states throughout; no horizontal overflow at 375px.
 
+### 7. Tire size — what RideStyler actually supports (investigated live)
+The render's tire levers (from `VehicleRenderInstructions`) are `VehicleTireOption` and
+`TireFitment`/`TireFitmentFront`/`TireFitmentRear`. Tested against the live API:
+- **`VehicleTireOption` works and changes the rendered tire** — but it selects one of the
+  vehicle's **factory** tire/fitment *packages*, and these are all stock sizes. The F-350
+  exposes exactly **two** (`GetTireOptionDetails`): 33.2" on an 18" wheel and 34.1" on a 20"
+  wheel — confirmed they produce different renders (md5-diff). Sampled other trucks: Sierra
+  1500 = 3 options (32–33"), Jeep Wrangler = 1 (31.5"), Tundra = 1 (32.5"). **No truck
+  exposes aftermarket 35/37/40" off-road sizes.**
+- **`TireFitment` (arbitrary aftermarket tire) does NOT render bigger tires.** Passing a
+  large tire fitment returns `{"Message":"Sizes conflict for specified wheel or tire."}` —
+  the tire must precisely match the selected wheel's width/diameter. The legitimate
+  plus-size flow (`Tire/GetFitments` with a `Recommend.OutsideDiameterTargetWhole`) needs a
+  POST body, which the **public demo key rejects** (`Code 151 Invalid authentication token`
+  — the demo key only authenticates as a GET query param); the GET variant returned the same
+  tires regardless of target diameter and didn't render larger. So there is **no reliable,
+  independently-selectable tire-diameter param** for 35/37/40" with the available key/data.
+- **`VehicleTireOption` is ignored once an aftermarket `WheelFitment` is set** (verified:
+  identical md5 across tire options when a wheel is selected) — an aftermarket wheel carries
+  its own tire. So tire size and aftermarket wheels are mutually exclusive levers.
+- **A bigger lift does not unlock bigger tires** — `Suspension` only raises the body; it's
+  independent of the tire-option list.
+
+**What was implemented (honest, not faked):** a compact **Tire size** control driven by the
+real factory `VehicleTireOption` packages — chips labeled with the actual outside diameter +
+rim (e.g. `33" / 18" wheel`, `34" / 20" wheel`), shown only when a truck has ≥2 options.
+Mobile = horizontal-scroll chip row (like paint/wheels); desktop = a side-controls Field plus
+a "Tires" row in the build summary. Wired into `buildRenderUrl` (`VehicleTireOption`, only
+when on factory wheels), the spec, the prefetch cache-warming, and the spec-strip label
+(`… · 34" tires · …`). Picking a tire size resets to factory wheels so it actually applies;
+the control dims when an aftermarket wheel is selected (since the wheel then governs the
+tire). Verified live: switching 33"→34" changes the render and the spec strip. **No fake
+35/37/40" sizes were added** — those aren't renderable; the dominant "aggressive stance"
+lever remains LIFT, which is already a prominent control.
+
 ---
 
 ## Honest assessment of quality
