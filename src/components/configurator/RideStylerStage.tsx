@@ -245,7 +245,7 @@ export default function RideStylerStage() {
   const prefetched = useRef<Set<string>>(new Set());
   const queue = useRef<string[]>([]);
   const active = useRef(0);
-  const MAX_CONCURRENCY = 6;
+  const MAX_CONCURRENCY = 10;
 
   const pump = useCallback(() => {
     // Inner hoisted fn so the completion handler can re-pump without a self-reference.
@@ -269,10 +269,14 @@ export default function RideStylerStage() {
   }, []);
 
   const enqueue = useCallback(
-    (urls: string[]) => {
-      for (const u of urls) {
-        if (!prefetched.current.has(u) && !queue.current.includes(u)) queue.current.push(u);
-      }
+    (urls: string[], priority = false) => {
+      const fresh = urls.filter(
+        (u) => !prefetched.current.has(u) && !queue.current.includes(u),
+      );
+      // Priority items (wheels) jump to the FRONT so late-arriving wheel
+      // fitments still get warmed before the 15 colors.
+      if (priority) queue.current.unshift(...fresh);
+      else queue.current.push(...fresh);
       pump();
     },
     [pump],
@@ -281,17 +285,17 @@ export default function RideStylerStage() {
   // Warm the moment a truck is selected (and on lift/color change): all wheels, all of THIS
   // truck's angles, and all colors at the current lift/wheel/angle.
   useEffect(() => {
-    const urls: string[] = [];
-    for (const w of ["", ...wheels.map((x) => x.WheelFitmentID)]) {
-      urls.push(buildRenderUrl({ ...spec, wheelId: w }));
-    }
-    for (const v of truck.views) {
-      urls.push(buildRenderUrl({ ...spec, view: v }));
-    }
-    for (const c of PAINTS) {
-      urls.push(buildRenderUrl({ ...spec, paint: c.hex }));
-    }
-    enqueue(urls);
+    // Wheels FIRST (priority) — every fitment at the current spec — so swapping
+    // wheels is instant. Then the camera angles and all paint colors.
+    const wheelUrls = ["", ...wheels.map((x) => x.WheelFitmentID)].map((w) =>
+      buildRenderUrl({ ...spec, wheelId: w }),
+    );
+    enqueue(wheelUrls, true);
+
+    const rest: string[] = [];
+    for (const v of truck.views) rest.push(buildRenderUrl({ ...spec, view: v }));
+    for (const c of PAINTS) rest.push(buildRenderUrl({ ...spec, paint: c.hex }));
+    enqueue(rest);
   }, [spec, wheels, truck, enqueue]);
 
   const updating = displayedUrl !== renderUrl && !imgError;
@@ -640,8 +644,8 @@ export default function RideStylerStage() {
                   updating={updating}
                   clickable={canRotate}
                   onClick={rotate}
-                  minHeight={200}
-                  imgMaxClass="max-h-[38vh]"
+                  minHeight={300}
+                  imgMaxClass="max-h-[52vh]"
                 >
                   {/* Top: name + Change (replaces the big picker) */}
                   <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-2 bg-ink/85 text-white px-3 py-2 pointer-events-none">
