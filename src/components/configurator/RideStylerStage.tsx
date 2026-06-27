@@ -375,6 +375,15 @@ export default function RideStylerStage() {
                 alt=""
                 aria-hidden="true"
                 className="hidden"
+                ref={(node) => {
+                  // Cached images (the preloader warms them) are often already
+                  // `complete` before React attaches onLoad, so onLoad never
+                  // fires. Promote immediately when the element is already loaded.
+                  if (node && node.complete && node.naturalWidth > 0) {
+                    setDisplayedUrl(renderUrl);
+                    setImgError(false);
+                  }
+                }}
                 onLoad={() => {
                   setDisplayedUrl(renderUrl);
                   setImgError(false);
