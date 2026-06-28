@@ -1,33 +1,36 @@
 import Link from "next/link";
 import { site, categories } from "@/lib/site";
 
+// Static export is mounted under /watts; prefix public assets so they resolve there.
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 // Map each lifted category to its real Watts photo in /public/home.
 const categoryImages: Record<string, string> = {
-  ford: "/home/cat-ford.jpg",
-  ram: "/home/cat-ram.jpg",
-  chevy: "/home/cat-chevy.jpg",
-  gmc: "/home/cat-gmc.jpg",
-  toyota: "/home/cat-toyota.jpg",
-  diesel: "/home/cat-diesel.jpg",
-  suv: "/home/cat-suv.jpg",
-  jeep: "/home/cat-jeep.jpg",
+  ford: `${BASE}/home/cat-ford.jpg`,
+  ram: `${BASE}/home/cat-ram.jpg`,
+  chevy: `${BASE}/home/cat-chevy.jpg`,
+  gmc: `${BASE}/home/cat-gmc.jpg`,
+  toyota: `${BASE}/home/cat-toyota.jpg`,
+  diesel: `${BASE}/home/cat-diesel.jpg`,
+  suv: `${BASE}/home/cat-suv.jpg`,
+  jeep: `${BASE}/home/cat-jeep.jpg`,
 };
 
 const featured = [
   {
-    img: "/home/slide-109240.jpg",
+    img: `${BASE}/home/slide-109240.jpg`,
     badge: "Built by Watts",
     title: "F-350 Super Duty Platinum",
     spec: "Desert Sand · 8\" Lift · 24\" Forged Wheels",
   },
   {
-    img: "/home/slide-108855.jpg",
+    img: `${BASE}/home/slide-108855.jpg`,
     badge: "Dually",
     title: "F-450 Limited Dually",
     spec: "Avalanche Gray · Leveled Stance · 22\" Black",
   },
   {
-    img: "/home/slide-109181.jpg",
+    img: `${BASE}/home/slide-109181.jpg`,
     badge: "Matching Pair",
     title: "Star White F-350 & Raptor R",
     spec: "Color-Matched Build · Premium Off-Road Package",
@@ -55,7 +58,7 @@ export default function Home() {
       {/* ============ 1. HERO ============ */}
       <section className="relative min-h-[88vh] flex items-end overflow-hidden bg-ink">
         <img
-          src="/home/slide-109354.jpg"
+          src={`${BASE}/home/slide-109354.jpg`}
           alt="Lifted Ford F-350 Super Duty by Watts Automotive"
           className="wa-zoom absolute inset-0 h-full w-full object-cover"
           fetchPriority="high"
@@ -112,7 +115,7 @@ export default function Home() {
           <div className="relative">
             <div className="overflow-hidden shadow-card group">
               <img
-                src="/home/slide-109330.jpg"
+                src={`${BASE}/home/slide-109330.jpg`}
                 alt="Custom lifted GMC Sierra configured at Watts Automotive"
                 className="w-full aspect-[16/10] object-cover transition-transform duration-700 group-hover:scale-105"
                 loading="lazy"
@@ -257,7 +260,7 @@ export default function Home() {
       {/* ============ 6. CUSTOM / SERVICE + FINANCING ============ */}
       <section className="relative bg-ink overflow-hidden">
         <img
-          src="/home/slide-108828.jpg"
+          src={`${BASE}/home/slide-108828.jpg`}
           alt="Watts Automotive lifted trucks ready for nationwide delivery"
           className="absolute inset-0 h-full w-full object-cover opacity-35"
           loading="lazy"

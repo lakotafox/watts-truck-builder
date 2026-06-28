@@ -12,6 +12,7 @@ const nextConfig: NextConfig = isExport
       assetPrefix: "/watts",
       trailingSlash: true,
       images: { unoptimized: true },
+      env: { NEXT_PUBLIC_BASE_PATH: "/watts" },
     }
   : {};
 
